@@ -7,10 +7,9 @@ import nolds # Nonlinear measures for dynamical systems
 import numpy as np # Array processing for numbers, strings, records, and objects
 import os # use OS functions
 import random # Work with random numbers
-# import scipy # Scientific Library for Python
+import scipy # Scientific Library for Python
 import sklearn.metrics # Machine Learning in Python
 import sklearn.neighbors # Machine Learning in Python
-import time
 from operator import sub # Standard operators as functions
 from toolz import curry # List processing tools and functional utilities
 
@@ -130,9 +129,14 @@ def deprom_data(x,step):
     k=0; b=0;
     data=np.ones((len(x)*step))*np.nan
     serie=np.ones((step))*np.nan
+    if min(x)==0:
+        min_val=0
+    else:
+        min_val=np.mean(x)-3*np.std(x)
+    max_val=np.mean(x)+3*np.std(x)
     while k<=len(x)-1:
         for i in range(0,step):
-            serie[i]=random.random()
+            serie[i]=random.uniform(min_val,max_val) # random()
         data[b:b+step]=x[k]*step*serie/sum(serie)
         b=b+step
         k=k+1
@@ -208,7 +212,19 @@ def monthly(data_var,data_time,data_type):
     month_mean=month_mean/n_years
     return  month_mean, month_date
 
-global s_val,sta_sync,ynr1,ynd1,distanceC,dist_xn_xnd
+def yn_obj(yn_val,*args):
+    # Objetive function for yn
+    sta_sync1,ynr1,distanceA,indA,dist_gcm_gcm,s_max=args
+    distanceB=np.sqrt((yn_val-sta_sync1)**2+ynr1)
+    dist_sta_sta=min(distanceB)
+    indB=np.where(distanceB==dist_sta_sta)
+    if (distanceB[indA][0]*distanceA[indB][0])/(dist_sta_sta*dist_gcm_gcm)<=s_max:
+        return distanceB[indA][0]+distanceA[indB][0]+dist_sta_sta
+    else:
+        return (distanceB[indA][0]+distanceA[indB][0]+dist_sta_sta)**3
+
+import warnings
+warnings.filterwarnings("ignore")
 
 def chaotic_statistcal_downscaling(station_data,station_catalog,model_historic,model_rcp,output_folder,int_acum,cal_date,val_date,app_date):
     # station_data: csv file with the climatic data of the stations
@@ -237,7 +253,7 @@ def chaotic_statistcal_downscaling(station_data,station_catalog,model_historic,m
     print "Loading NetCDF Data: Historic Data "
     time_his=[];time_rcp=[];    
     for filename in os.listdir(model_historic):
-        his = nc.Dataset(model_historic+'\\'+filename)
+        his = nc.Dataset(model_historic+filename)
         if filename==os.listdir(model_historic)[0]:
             # Variable type and units data
             time_unit=his.variables['time'].units 
@@ -259,13 +275,15 @@ def chaotic_statistcal_downscaling(station_data,station_catalog,model_historic,m
         units='(grados C)'     
     print "Loading NetCDF Data: RCP Data "
     for filename in os.listdir(model_rcp):
-        rcp = nc.Dataset(model_rcp+'\\'+filename)  
+        rcp = nc.Dataset(model_rcp+filename)  
         if filename==os.listdir(model_rcp)[0]:
             rcp_model=rcp.model_id
             rcp_esc=rcp.experiment_id
-        rcp = nc.Dataset(model_rcp+'\\'+filename)
-        time_valf=rcp.variables['time'][:]-0.5 # The code works for daily values only right now
-        time_rcp=np.concatenate((time_rcp,nc.num2date(time_valf,units=time_unit,calendar=time_cal)))
+            time_unit1=rcp.variables['time'].units 
+            time_cal1=rcp.variables['time'].calendar
+        rcp = nc.Dataset(model_rcp+filename)
+        time_valf=rcp.variables['time'][:]-0.5 # The code works for daily values only right now  
+        time_rcp=np.concatenate((time_rcp,nc.num2date(time_valf,units=time_unit1,calendar=time_cal1)))
     time_gcm=np.concatenate((time_his, time_rcp))
     print "Get GCM cell and model information"
     gcm_cell=np.empty((len(location)-1,3))* np.nan 
@@ -303,24 +321,7 @@ def chaotic_statistcal_downscaling(station_data,station_catalog,model_historic,m
     rcp.close
     caos_results=np.empty((n,len(int_acum)),dtype=list)
     ds_results=[]
-    
-    np.mean(data_his)
-    np.min(data_his)
-    np.max(data_his)
-    np.std(data_his)
-    
-    model_01=np.concatenate((model[0][13149:],model[1][13149:]))
-    np.mean(model_01)
-    np.min(model_01)
-    np.max(model_01)
-    np.std(model_01)
-        
-    
-    
-    
-    
-    
-    for z in range(3,ns): #(3,ns)
+    for z in range(3,ns):
         print "Station: " +station_names[z]
         data_sta= station[1:,z]
         time_z=np.array(time_sta)[~np.isnan(data_sta)]   
@@ -334,8 +335,9 @@ def chaotic_statistcal_downscaling(station_data,station_catalog,model_historic,m
         else:
             val_end=int(np.where(time_z==val_date)[0])
         app_end=int(np.where(time_gcm==dt.datetime.combine(app_date,dt.datetime.min.time()))[0])
-        print "Chaos Analysis"
+        print "    Chaos Analysis"
         for step in int_acum:
+            print "      step: " + str(step)
             # Load existing results and mean data values for different mean intervals
             caos_pos=int(np.where(np.array(int_acum)==step)[0])
             if caos_results[int(gcm_cell[z-3,2]),caos_pos] is None:
@@ -358,11 +360,7 @@ def chaotic_statistcal_downscaling(station_data,station_catalog,model_historic,m
                 caos_results[int(gcm_cell[z-3,2]),caos_pos]=[caos_gcm,lag_gcm,m_gcm]
                 if caos_gcm==1:
                     break    
-        print "Phase Space Reconstruction"
-        # Amp Correction: Mean correction
-        data_gcm_original=data_gcm
-        amp=np.mean(data_sta[:cal_end+1])/np.mean(data_gcm[offset:offset+cal_end+1])       
-        data_gcm=data_gcm*amp  
+        print "    Phase Space Reconstruction"
         # Mean time series
         len_cal=int(math.ceil(len(data_sta[:cal_end+1])/float(step)))
         len_app=int(math.ceil(len(data_gcm[offset+cal_end:app_end+1])/float(step)))
@@ -374,7 +372,7 @@ def chaotic_statistcal_downscaling(station_data,station_catalog,model_historic,m
         sta_cal_vec=sta_vec[:len_cal-(m_sta-1)*lag_sta+1]
         delta=(m_gcm-1)*lag_gcm-(m_sta-1)*lag_sta  
         gcm_cal_vec=gcm_vec[-len_app-len_cal-delta:-len_app-(m_gcm-1)*lag_gcm +1]      
-        print "Calibration"
+        print "    Calibration"
         # Parameter lag: Generalized Similarity Function
         gcm_cal=deconstruct(gcm_cal_vec, lag_gcm, m_gcm)
         leng=len(gcm_cal)
@@ -398,57 +396,77 @@ def chaotic_statistcal_downscaling(station_data,station_catalog,model_historic,m
         lencal=len(gcm_cal_vec)
         lenapp=len(gcm_app_vec)
         # Parameters u and ss: Mutual False Nearest Neighbor"
-        ss=np.empty((lencal+lenapp,1))* np.nan
+        ss=np.empty((lencal+lenapp,lag_sta+1))* np.nan
         u=np.empty((lencal+lenapp,1))* np.nan
-        dist_gcm_gcm=np.empty((lencal,1))* np.nan
-        dist_sta_gcm=np.empty((lencal,1))* np.nan
-        dist_sta_sta=np.empty((lencal,1))* np.nan
-        dist_gcm_sta=np.empty((lencal,1))* np.nan
+        k=0;a=0
         for t in range(0,lencal):
-            # Distance in station
+            # Distance in STATION
             distanceA=sklearn.metrics.pairwise.euclidean_distances(gcm_cal_vec,np.reshape(gcm_cal_vec[t],(1,m_gcm))) 
             distanceA1=np.delete(distanceA, t)
-            indA=np.where(distanceA1==min(distanceA1))[0] 
-            dist_gcm_gcm[t]=distanceA1[indA][0]  
-            dist_sta_gcm[t]=np.linalg.norm(sta_cal_vec[t]-sta_cal_vec[indA])     
+            dist_gcm_gcm=min(i for i in distanceA1 if i > 0) 
+            indA=np.where(distanceA1==dist_gcm_gcm)[0] 
             # Distance in GCM
             distanceB=sklearn.metrics.pairwise.euclidean_distances(sta_cal_vec,np.reshape(sta_cal_vec[t],(1,m_sta)))
-            distanceB1=np.delete(distanceB, t)
-            indB=np.where(distanceB1==min(distanceB1))[0] 
-            dist_sta_sta[t]=distanceA1[indB][0] 
-            dist_gcm_sta[t]=np.linalg.norm(gcm_cal_vec[t]-gcm_cal_vec[indB])     
+            distanceB1=np.delete(distanceB,t)
+            dist_sta_sta= min(j for j in distanceB1 if j > 0)            
+            indB=np.where(distanceB1==dist_sta_sta)[0]
+            # Distance GCM-STATION,STATION-GCM
+            dist_gcm_sta=distanceA[indB][0]    
+            dist_sta_gcm=distanceB[indA] [0]     
             # Compute ss and u
-            ss[t]=(dist_gcm_sta[t]*dist_sta_gcm[t])/(dist_gcm_gcm[t]*dist_sta_sta[t])
-            u[t]=sum(ss[:t+1])/(t+1)
-            del indA,indB          
-        print "Synchronization"
-        gcm_sync=np.empty((lencal+lenapp,m_gcm))* np.nan
+            ss[t,lag_sta]=(dist_gcm_sta*dist_sta_gcm)/(dist_gcm_gcm*dist_sta_sta)
+            ss[a,k]=ss[t,lag_sta]
+            u[t]=np.nanmean(ss[:t+1,lag_sta])
+            if k==lag_sta-1:
+                k=0
+                a=a+1
+            else:
+                k=k+1
+        print "    Synchronization"
         sta_sync=np.empty((lencal+lenapp,m_sta))* np.nan 
-        gcm_sync[:len(gcm_cal_vec)]=gcm_cal_vec
-        gcm_sync[len(gcm_cal_vec):]=gcm_app_vec
-        sta_sync[:len(sta_cal_vec)]=sta_cal_vec 
-        for v in range(0,lenapp): #lenapp
+        sta_sync[:lencal]=sta_cal_vec
+        distanceC=sklearn.metrics.pairwise.euclidean_distances(gcm_cal_vec,gcm_app_vec)
+        yn_max=np.nanmax(sta_sync)*2
+        if np.min(sta_sync)>=0:
+            yn_min=np.min(sta_sync)/2   
+        else:
+            yn_min=np.min(sta_sync)*2   
+        s_max_list=[np.nanmax(ss[:a,r]) for r in range(0,lag_sta)]       
+        for v in range(6203,lenapp): #lenapp              
             # Find xn, xnd and ynd (Direct)
-            xn=np.reshape(gcm_app_vec[v],(1,m_gcm))
-            distanceC=np.reshape(sklearn.metrics.pairwise.euclidean_distances(gcm_sync[:t+v+1],xn),t+v+1)
-            dist_xn_xnd=min(distanceC)
-            indC=np.where(distanceC==dist_xn_xnd)[0] 
-            ynd=sta_sync[indC]         
+            distanceA=np.reshape(distanceC[:,v],lencal)
+            dist_gcm_gcm=min(distanceA)
+            indA=np.where(distanceA==dist_gcm_gcm)[0]
             # Create variable yn
-            yn=np.empty((1,m_sta))*np.nan
+            yn=np.empty((1,m_sta))* np.nan
             yn[0,0:-1]=sta_sync[t+v+1-lag_sta,1:]        
-            # Compute yn, ynd and ynr (Direct)
-            yn[0][-1]=ynd[0][-1]
-            distanceD=np.reshape(sklearn.metrics.pairwise.euclidean_distances(sta_sync[:t+v+1],yn),t+v+1)
-            dist_yn_ynr=min(distanceD)
-            indD=np.where(distanceD==dist_yn_ynr)[0] 
-            xnr=gcm_sync[indD]   
-            # Find u[t+v+1] and ss[t+v+1]
-            ss[t+v+1]=(np.linalg.norm(yn-ynd)*np.linalg.norm(xn-xnr))/(dist_xn_xnd*dist_yn_ynr)
-            u[t+v+1]=np.nanmean(ss[:t+v+1]) 
+            # Compute ynr1 and ynd1
+            ynr1=np.reshape(sklearn.metrics.pairwise.euclidean_distances(sta_sync[:t+1,0:-1],np.reshape(yn[0,0:-1],(1,m_sta-1)))**2,t+1)
+            # Find yn and distances    
+            s_max=s_max_list[k]
+            args=(sta_sync[:t+1,-1],ynr1,distanceA,indA,dist_gcm_gcm,s_max)           
+            min_dist=scipy.optimize.differential_evolution(yn_obj, [(yn_min, yn_max)],args=args,popsize=50, mutation=(1, 1.5), recombination=0.5)          
+            distanceB=np.sqrt((min_dist.x-sta_sync[:t+1,-1])**2+ynr1)
+            dist_sta_sta=min(distanceB)
+            indB=np.where(distanceB==dist_sta_sta)
+            dist_gcm_sta=distanceA[indB][0]    
+            dist_sta_gcm=distanceB[indA][0]
+            # Compute ss and u
+            ss[t+v+1,lag_sta]=(dist_sta_gcm*dist_gcm_sta)/(dist_sta_sta*dist_gcm_gcm)
+            u[t+v+1]=np.nanmean(ss[:t+v+1,lag_sta]) 
+            if k==lag_sta-1:
+                k=0
+            else:
+                k=k+1 
             # Add yn to sta_sync
+            yn[0][-1]=min_dist.x 
             sta_sync[t+v+1]=yn
-        print "Time Series Reconstruction"
+        print "    Time Series Reconstruction"
+        # Amp Correction: Mean correction
+        data_gcm_original=data_gcm
+        amp=np.mean(data_sta[:cal_end+1])/np.mean(data_gcm[offset:offset+cal_end+1])       
+        data_gcm=data_gcm*amp  
+        # Reconstruct prom data
         sta_app_step=deconstruct(sta_sync,lag_sta, m_sta)
         sta_app=deprom_data(sta_app_step,step) 
         time_ds=[time_z[0]+ dt.timedelta(days=t) for t in range(0,len(sta_app))]
@@ -456,30 +474,35 @@ def chaotic_statistcal_downscaling(station_data,station_catalog,model_historic,m
         sta_app=sta_app[:end_index+1]
         sta_app[:len(data_sta[:cal_end+1])]=data_sta[:cal_end+1]
         time_ds=time_ds[:end_index+1]
-        print "Validation"           
+        print "    Validation"           
         ds_mean,ds_date=monthly(sta_app[cal_end+1:val_end+1],time_ds[cal_end+1:val_end+1],var_type)
         val_mean,val_da=monthly(data_sta[cal_end+1:val_end+1],time_ds[cal_end+1:val_end+1],var_type)  
         rmse = np.sqrt(sklearn.metrics.mean_squared_error(ds_date, val_da))
-        print "Writing results to CSV"
+        print "    Writing results to CSV"
         name_file=station_names[z]+'_'+var_type+'_'+rcp_esc
         file_csv=output_folder+'CSD_'+name_file+ '.csv'
         ref=sta_app[:cal_end+1]
         eoc=sta_app[-len(ref):]
-        moc=sta_app[cal_end+1+len(sta_app[cal_end+1:-len(ref)+1])/2-len(ref)/2:cal_end+1+len(sta_app[cal_end+1:-len(ref)+1])/2+len(ref)/2]
+        moc=sta_app[val_end+1+len(sta_app[cal_end+1:-len(ref)+1])/2-len(ref)/2:val_end+1+len(sta_app[cal_end+1:-len(ref)+1])/2+len(ref)/2]
         ref_eoc=(np.mean(eoc)-np.mean(ref))/np.mean(ref)*100
         ref_moc=(np.mean(moc)-np.mean(ref))/np.mean(ref)*100
+        eoc_start=time_ds[-len(ref)]
+        eoc_end=time_ds[-1] 
+        moc_start=time_ds[val_end+1+len(sta_app[cal_end+1:-len(ref)+1])/2-len(ref)/2]
+        moc_end=time_ds[val_end+1+len(sta_app[cal_end+1:-len(ref)+1])/2+len(ref)/2]
+        time_ds[val_end+1+len(sta_app[cal_end+1:-len(ref)+1])/2-len(ref)/2]
         with open(file_csv, 'wb') as csvfile:
             write_ans = csv.writer(csvfile, delimiter=',')
             write_ans.writerow(['Chaotic Statistical Downscaling'])
             write_ans.writerow(['Variable: ',var_type,'Model: ',rcp_model,'Experiment: ',rcp_esc])
             write_ans.writerow(['Time delay:',lag_sta,'Dimension:',m_sta,'Max Lyapunov:',"%.3f" %(max(lyapunov_sta))])      
-            write_ans.writerow(['Step (days): ',step,'Calibration Start :',time_z[0],'Validation Start:',time_z[cal_end+1]])      
+            write_ans.writerow(['Step(days): ',step,'Calibration Start :',time_z[0],'Validation Start:',time_z[cal_end+1]])        
+            write_ans.writerow(['MOC(start-end) :',moc_start,moc_end,'EOC(start-end):',eoc_start,eoc_end])
             write_ans.writerow(['RMSE (monthly): ',"%.2f" %(rmse), 'inc/dec MOC(%)',"%.1f" %(ref_moc),'inc/dec EOC(%)',"%.1f" %(ref_eoc)]) #Reference period Calibration Start- cAlibration End
             write_ans.writerow(['Year','Month','Day','Data'])
             for i in range(val_end+1,len(sta_app)):
                 write_ans.writerow([time_ds[i].year,time_ds[i].month,time_ds[i].day, sta_app[i]]) 
-        ds_results.append([station_names[z],time_xxx,rmse,ref_moc,ref_eoc ,time_ds,sta_app])
-        print "Making some plots"
+        print "    Making some plots"
         #u function
         fig = plt.figure()
         plt.plot(u,'r');plt.xlabel('Time');plt.ylabel('U');plt.title('U function')
@@ -525,5 +548,6 @@ def chaotic_statistcal_downscaling(station_data,station_catalog,model_historic,m
         plt.legend(handles=[a, b])
         fig.savefig(output_folder+name_file+'_monthly_multianual.jpg')
         plt.close()
-        print "Done"
+        ds_results.append([station_names[z],rmse,ref_moc,ref_eoc ,time_ds,sta_app])
+    print "Done"
     return ds_results
