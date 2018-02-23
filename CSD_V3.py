@@ -1,3 +1,8 @@
+"""
+Created on January 2018
+@author: Freddy Santiago Duarte Prieto
+"""
+
 import csv # Write results to a csv file
 import datetime as dt # Work with datetime format
 import math # Mathematic operations
